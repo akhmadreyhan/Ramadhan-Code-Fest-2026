@@ -91,3 +91,6 @@
 [submodule "website-builder"]
 	path = website-builder
 	url = https://github.com/zidniahmeed/website-builder.git
+[submodule "floodzy"]
+	path = floodzy
+	url = https://github.com/MattYudha/floodzy.git
