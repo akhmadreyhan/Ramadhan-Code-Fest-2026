@@ -24,6 +24,18 @@ def sys_prompt():
 
 
 @mcp.tool()
+def chat_cat(message: str) -> str:
+    """
+    Categorize the user message, is it complaint, chitchat, or question.
+    """
+    chat_category = {"complaint", "chitchat", "question"}
+    if message != next(iter(chat_category.values())):
+        return f"Message {message} is not complaint, forbidden to run tool create_ticket"
+    else:
+        return f"Message {message} is complaint, allowed to run tool create_ticket"
+    
+
+@mcp.tool()
 def create_ticket(
     user_id: int,
     title: str,
@@ -33,11 +45,13 @@ def create_ticket(
 ) -> str:
     """
     Create a new support ticket in the database.
-    category must be one of: internet, signal, billing.
+    IMPORTANT: user_id MUST come from find_user() or create_user() — never invented.
+    category must be one of: technical support, billing, account management, retention & experience.
     priority must be one of: low, medium, high.
-    status_ticket is automatically set to 'open'.
+    status is automatically set to 'open'.
     """
-    valid_categories = {"internet", "signal", "billing"}
+
+    valid_categories = {"technical support", "billing", "account management", "retention & experience"}
     valid_priorities = {"low", "medium", "high"}
 
     if category not in valid_categories:
@@ -45,37 +59,46 @@ def create_ticket(
     if priority not in valid_priorities:
         return f"Invalid priority '{priority}'. Must be one of: {', '.join(valid_priorities)}"
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    query = text("""
-        INSERT INTO tickets (user_id, title, description, category, status, priority, created_at, updated_at)
-        VALUES (:user_id, :title, :description, :category, 'open', :priority, :now, :now)
-    """)
-
     try:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with sql.connect() as conn:
-            result = conn.execute(
-                query,
-                {
-                    "user_id": user_id,
-                    "title": title,
-                    "description": description,
-                    "category": category,
-                    "priority": priority,
-                    "now": now,
-                },
+            search_user = conn.execute(
+                text("SELECT id FROM users WHERE id = :user_id"), {"user_id": user_id}
             )
-            conn.commit()
-            return f"Ticket created successfully! Ticket ID: {result.lastrowid}, Status: open, Priority: {priority}"
+            result = search_user.fetchone()
+            if result is None:
+                return (
+                    f"ERROR: user_id {user_id} does not exist. "
+                    "Call find_user() first, then create_user() if user is new, "
+                    "and use the ID returned from those tools."
+                )
+            else:
+                add_ticket = text("""
+                INSERT INTO tickets (user_id, title, description, category, status, priority, created_at, updated_at)
+                VALUES (:user_id, :title, :description, :category, 'open', :priority, :now, :now)
+                """)
+                result = conn.execute(
+                    add_ticket,
+                    {
+                        "user_id": user_id,
+                        "title": title,
+                        "description": description,
+                        "category": category,
+                        "priority": priority,
+                        "now": now,
+                    },
+                )
+                conn.commit()
+                return f"Ticket created successfully! Ticket ID: {result.lastrowid}, Status: open, Priority: {priority}"
     except Exception as e:
         return f"Failed to create ticket: {str(e)}"
 
 
 @mcp.tool()
-def find_or_create_user(name: str, email: str, phone_number: str, address: str) -> str:
+def find_user(email: str, phone_number: str) -> str:
     """
-    Find user by email or phone number. If not found, create a new user.
+    Find user by email or phone number.
     """
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     query = text("""
         SELECT id, name, email, phone_number, address FROM users WHERE email = :email OR phone_number = :phone_number
     """)
@@ -85,24 +108,40 @@ def find_or_create_user(name: str, email: str, phone_number: str, address: str) 
             result = conn.execute(query, {"email": email, "phone_number": phone_number})
             user = result.fetchall()
             if user:
-                return f"User found with ID {user[0]['id']}"
+                # Akses pakai index integer, bukan string key
+                return f"User found: ID={user[0][0]}, name={user[0][1]}, email={user[0][2]}"
             else:
-                add_user = text("""
-                INSERT INTO users (name, email, phone_number, address, created_at, updated_at)
-                VALUES (:name, :email, :phone_number, :address, :now, :now)
-                """)
-                result = conn.execute(
-                    add_user,
-                    {
-                        "name": name,
-                        "email": email,
-                        "phone_number": phone_number,
-                        "address": address,
-                        "now": now,
-                    },
+                return (
+                    f"User with email {email} or phone number {phone_number} not found"
                 )
-                conn.commit()
-                return f"User created successfully! User ID: {result.lastrowid}"
+    except Exception as e:
+        return f"Failed to find user: {str(e)}"
+
+
+@mcp.tool()
+def create_user(name: str, email: str, phone_number: str, address: str) -> str:
+    """
+    Create a new user with the provided information.
+    """
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with sql.connect() as conn:
+            add_user = text("""
+            INSERT INTO users (name, email, phone_number, address, created_at, updated_at)
+            VALUES (:name, :email, :phone_number, :address, :now, :now)
+            """)
+            result = conn.execute(
+                add_user,
+                {
+                    "name": name,
+                    "email": email,
+                    "phone_number": phone_number,
+                    "address": address,
+                    "now": now,
+                },
+            )
+            conn.commit()
+            return f"User created successfully! User ID: {result.lastrowid}"
     except Exception as e:
         return f"Failed to find or create user: {str(e)}"
 
